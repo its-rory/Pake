@@ -44,9 +44,9 @@ inputs:
     default: "true"
 
   hide-on-close:
-      description: "Hide window on close instead of exiting"
-      required: false
-      default: "true"
+    description: "Hide window on close instead of exiting"
+    required: false
+    default: "true"
 
 outputs:
   package-path:
