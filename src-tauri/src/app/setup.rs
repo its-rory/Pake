@@ -69,6 +69,7 @@ pub fn set_system_tray(
         .on_tray_icon_event(move |tray, event| match event {
             TrayIconEvent::Click { button, .. } => {
                 if button == tauri::tray::MouseButton::Left {
+                    // 左键单击：显示/隐藏窗口
                     if let Some(window) = tray.app_handle().get_webview_window("pake") {
                         let is_visible = window.is_visible().unwrap_or(false);
                         if is_visible {
