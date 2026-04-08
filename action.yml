@@ -38,6 +38,16 @@ inputs:
     required: false
     default: "false"
 
+  show-system-tray:
+    description: "Show system tray icon in app"
+    required: false
+    default: "true"
+
+  hide-on-close:
+      description: "Hide window on close instead of exiting"
+      required: false
+      default: "true"
+
 outputs:
   package-path:
     description: "Path to the generated package"
@@ -84,6 +94,12 @@ runs:
         if [ "${{ inputs.debug }}" == "true" ]; then
           ARGS+=("--debug")
         fi
+
+        if [ "${{ inputs.show-system-tray }}" == "true" ]; then
+          ARGS+=("--show-system-tray")
+        fi
+
+        ARGS+=("--hide-on-close" "${{ inputs.hide-on-close }}")
 
         # Create output directory
         mkdir -p "${{ inputs.output-dir }}"
