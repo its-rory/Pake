@@ -9,8 +9,30 @@ import {
   getSafeAppName,
   generateLinuxPackageName,
 } from '@/utils/name';
-import { PakeAppOptions, PlatformMap, WindowConfig } from '@/types';
+import {
+  PakeAppOptions,
+  PakeTauriConfig,
+  SupportedPlatform,
+  TauriPlatform,
+  WindowConfig,
+} from '@/types';
 import { tauriConfigDirectory, npmDirectory } from '@/utils/dir';
+
+type PlatformIconInfo = {
+  fileExt: string;
+  path: string;
+  defaultIcon: string;
+  message: string;
+};
+
+function asSupportedPlatform(platform: NodeJS.Platform): SupportedPlatform {
+  if (platform !== 'win32' && platform !== 'darwin' && platform !== 'linux') {
+    throw new Error(
+      `Pake only supports win32, darwin, and linux; detected '${platform}'.`,
+    );
+  }
+  return platform;
+}
 
 async function copyTemplateConfigs(): Promise<void> {
   const srcTauriDir = path.join(npmDirectory, 'src-tauri');
@@ -41,7 +63,7 @@ async function copyTemplateConfigs(): Promise<void> {
 async function handleLocalFile(
   url: string,
   useLocalFile: boolean,
-  tauriConf: any,
+  tauriConf: PakeTauriConfig,
 ): Promise<void> {
   const pathExists = await fsExtra.pathExists(url);
   if (pathExists) {
@@ -77,10 +99,16 @@ async function handleLocalFile(
 async function mergeLinuxConfig(
   options: PakeAppOptions,
   name: string,
-  tauriConf: any,
+  tauriConf: PakeTauriConfig,
   linuxBinaryName: string,
 ): Promise<void> {
-  delete tauriConf.bundle.linux.deb.files;
+  const linuxBundle = tauriConf.bundle.linux;
+  if (!linuxBundle) {
+    throw new Error(
+      'Linux bundle configuration is missing from tauri.linux.conf.json; cannot build Linux target.',
+    );
+  }
+  delete linuxBundle.deb.files;
 
   const linuxName = generateLinuxPackageName(name);
   const desktopFileName = `com.pake.${linuxName}.desktop`;
@@ -108,14 +136,14 @@ Terminal=false
   await fsExtra.writeFile(srcDesktopFilePath, desktopContent);
 
   const desktopInstallPath = `/usr/share/applications/${desktopFileName}`;
-  tauriConf.bundle.linux.deb.files = {
+  linuxBundle.deb.files = {
     [desktopInstallPath]: `assets/${desktopFileName}`,
   };
 
-  if (!tauriConf.bundle.linux.rpm) {
-    tauriConf.bundle.linux.rpm = {};
+  if (!linuxBundle.rpm) {
+    linuxBundle.rpm = {};
   }
-  tauriConf.bundle.linux.rpm.files = {
+  linuxBundle.rpm.files = {
     [desktopInstallPath]: `assets/${desktopFileName}`,
   };
 
@@ -143,11 +171,11 @@ Terminal=false
 async function mergeIcons(
   options: PakeAppOptions,
   name: string,
-  tauriConf: any,
-  platform: string,
+  tauriConf: PakeTauriConfig,
+  platform: SupportedPlatform,
   safeAppName: string,
 ): Promise<void> {
-  const platformIconMap: PlatformMap = {
+  const platformIconMap: Record<SupportedPlatform, PlatformIconInfo> = {
     win32: {
       fileExt: '.ico',
       path: `png/${safeAppName}_256.ico`,
@@ -218,7 +246,7 @@ async function mergeIcons(
 
   // Set tray icon path.
   let trayIconPath =
-    platform === 'darwin' ? 'png/icon_512.png' : tauriConf.bundle.icon[0];
+    platform === 'darwin' ? 'png/icon_512.png' : tauriConf.bundle.icon![0];
   if (options.systemTrayIcon.length > 0) {
     try {
       await fsExtra.pathExists(options.systemTrayIcon);
@@ -236,8 +264,10 @@ async function mergeIcons(
         );
         logger.warn(`✼ Default system tray icon will be used.`);
       }
-    } catch {
-      logger.warn(`✼ ${options.systemTrayIcon} not exists!`);
+    } catch (err) {
+      logger.warn(
+        `✼ Failed to apply system tray icon "${options.systemTrayIcon}": ${err instanceof Error ? err.message : String(err)}`,
+      );
       logger.warn(`✼ Default system tray icon will remain unchanged.`);
     }
   }
@@ -248,7 +278,7 @@ async function mergeIcons(
 
 async function injectCustomCode(
   options: PakeAppOptions,
-  tauriConf: any,
+  tauriConf: PakeTauriConfig,
 ): Promise<void> {
   const { inject, proxyUrl, multiInstance, multiWindow, wasm } = options;
   const injectFilePath = path.join(
@@ -322,10 +352,10 @@ ${entitlementEntries.join('\n')}
 }
 
 async function writeAllConfigs(
-  tauriConf: any,
-  platform: string,
+  tauriConf: PakeTauriConfig,
+  platform: SupportedPlatform,
 ): Promise<void> {
-  const platformConfigPaths: PlatformMap = {
+  const platformConfigPaths: Record<SupportedPlatform, string> = {
     win32: 'tauri.windows.conf.json',
     darwin: 'tauri.macos.conf.json',
     linux: 'tauri.linux.conf.json',
@@ -353,7 +383,7 @@ async function writeAllConfigs(
 export async function mergeConfig(
   url: string,
   options: PakeAppOptions,
-  tauriConf: any,
+  tauriConf: PakeTauriConfig,
 ) {
   await copyTemplateConfigs();
 
@@ -392,7 +422,7 @@ export async function mergeConfig(
     microphone,
   } = options;
 
-  const { platform } = process;
+  const platform = asSupportedPlatform(process.platform);
   const platformHideOnClose = hideOnClose ?? platform === 'darwin';
 
   const tauriConfWindowOptions: Partial<WindowConfig> = {
@@ -433,12 +463,18 @@ export async function mergeConfig(
       : `pake-${generateIdentifierSafeName(name)}`;
 
   if (platform === 'win32') {
-    tauriConf.bundle.windows.wix.language[0] = installerLanguage;
+    const windowsBundle = tauriConf.bundle.windows;
+    if (!windowsBundle) {
+      throw new Error(
+        'Windows bundle configuration is missing from tauri.windows.conf.json; cannot build Windows target.',
+      );
+    }
+    windowsBundle.wix.language[0] = installerLanguage;
   }
 
   await handleLocalFile(url, useLocalFile, tauriConf);
 
-  const platformMap: PlatformMap = {
+  const platformMap: Record<SupportedPlatform, TauriPlatform> = {
     win32: 'windows',
     linux: 'linux',
     darwin: 'macos',
